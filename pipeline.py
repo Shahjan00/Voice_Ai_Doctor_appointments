@@ -4,15 +4,18 @@ import aiohttp
 from dotenv import load_dotenv
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.frames.frames import TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response import LLMFullResponseAggregator
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.elevenlabs.stt import ElevenLabsSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import FunctionCallParams
 
-from booking import BookingStore
+import booking
 
 load_dotenv()
 
@@ -27,23 +30,34 @@ SYSTEM_PROMPT = (
 )
 
 
-async def build_pipeline(transport, store=None):
-    store = store or BookingStore()
+class TranscriptCapture(FrameProcessor):
+    def __init__(self, on_line, **kwargs):
+        super().__init__(**kwargs)
+        self._on_line = on_line
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, TranscriptionFrame):
+            await self._on_line("caller", frame.text)
+        await self.push_frame(frame, direction)
+
+
+async def build_pipeline(transport, on_transcript=None):
     session = aiohttp.ClientSession()
 
     async def check_availability(params: FunctionCallParams):
         args = params.arguments
-        result = store.availability(args.get("doctor_name"), args.get("date"))
+        result = booking.availability(args.get("doctor_name"), args.get("date"))
         await params.result_callback({"available": result})
 
     async def book(params: FunctionCallParams):
         args = params.arguments
-        result = store.book(args.get("phone"), args.get("doctor_name"), args.get("date"), args.get("time"))
+        result = booking.book(args.get("phone"), args.get("doctor_name"), args.get("date"), args.get("time"))
         await params.result_callback(result)
 
     async def cancel(params: FunctionCallParams):
         args = params.arguments
-        result = store.cancel(args.get("phone"), args.get("doctor_name"), args.get("date"), args.get("time"))
+        result = booking.cancel(args.get("phone"), args.get("doctor_name"), args.get("date"), args.get("time"))
         await params.result_callback(result)
 
     tools = ToolsSchema(standard_tools=[
@@ -101,14 +115,22 @@ async def build_pipeline(transport, store=None):
     context = LLMContext(tools=tools)
     pair = LLMContextAggregatorPair(context)
 
-    pipeline = Pipeline([
-        transport.input(),
-        stt,
-        pair.user(),
-        llm,
-        tts,
-        transport.output(),
-        pair.assistant(),
-    ])
+    steps = [transport.input(), stt]
+    if on_transcript is not None:
+        steps.append(TranscriptCapture(on_transcript))
+    steps.append(pair.user())
+    steps.append(llm)
+    if on_transcript is not None:
+        response = LLMFullResponseAggregator()
+
+        @response.event_handler("on_completion")
+        async def on_completion(aggregator, completion, completed):
+            if completed and completion.strip():
+                await on_transcript("agent", completion)
+
+        steps.append(response)
+    steps += [tts, transport.output(), pair.assistant()]
+
+    pipeline = Pipeline(steps)
     pipeline.http_session = session
     return pipeline
