@@ -1,0 +1,4 @@
+pipecat-ai[elevenlabs,google,webrtc]
+fastapi
+uvicorn[standard]
+python-dotenv
