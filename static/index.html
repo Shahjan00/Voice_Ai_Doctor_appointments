@@ -38,7 +38,6 @@
   <button id="endBtn" disabled>End call</button>
   <span id="status">Idle</span>
 </div>
-<audio id="remoteAudio" autoplay></audio>
 <div class="grid">
   <div class="card">
     <h2>Live transcript</h2>
@@ -52,8 +51,16 @@
   </div>
 </div>
 <script>
-let pc = null;
+let socket = null;
+let recorder = null;
 let localStream = null;
+let audioCtx = null;
+let analyser = null;
+let vadTimer = null;
+let speaking = false;
+let quietSince = 0;
+let playing = false;
+let player = null;
 let lastLineCount = 0;
 
 const statusEl = document.getElementById('status');
@@ -64,18 +71,28 @@ function setStatus(text) {
   statusEl.textContent = text;
 }
 
-function waitGathering(connection) {
-  return new Promise((resolve) => {
-    if (connection.iceGatheringState === 'complete') {
-      resolve();
-      return;
+function checkVolume() {
+  if (!analyser) {
+    return;
+  }
+  const data = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(data);
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) {
+    const v = (data[i] - 128) / 128;
+    sum += v * v;
+  }
+  const volume = Math.sqrt(sum / data.length);
+  const now = Date.now();
+  if (volume > 0.02) {
+    speaking = true;
+    quietSince = now;
+  } else if (speaking && now - quietSince > 1000) {
+    speaking = false;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'speech_end' }));
     }
-    connection.onicegatheringstatechange = () => {
-      if (connection.iceGatheringState === 'complete') {
-        resolve();
-      }
-    };
-  });
+  }
 }
 
 async function startCall() {
@@ -88,40 +105,66 @@ async function startCall() {
     startBtn.disabled = false;
     return;
   }
-  pc = new RTCPeerConnection();
-  localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
-  pc.ontrack = (event) => {
-    document.getElementById('remoteAudio').srcObject = event.streams[0];
-  };
-  pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'connected') {
-      setStatus('Connected. Speak now.');
-    } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-      setStatus('Connection ' + pc.connectionState + '.');
-    }
-  };
   setStatus('Calling.');
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  await waitGathering(pc);
-  const res = await fetch('/offer', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type }),
-  });
-  const answer = await res.json();
-  await pc.setRemoteDescription(answer);
-  endBtn.disabled = false;
+  socket = new WebSocket('ws://' + location.host + '/ws/call');
+  socket.binaryType = 'arraybuffer';
+  socket.onopen = () => {
+    setStatus('Connected. Speak now.');
+    endBtn.disabled = false;
+    audioCtx = new AudioContext();
+    const source = audioCtx.createMediaStreamSource(localStream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    source.connect(analyser);
+    vadTimer = setInterval(checkVolume, 100);
+    recorder = new MediaRecorder(localStream, { mimeType: 'audio/webm' });
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0 && !playing && socket.readyState === WebSocket.OPEN) {
+        event.data.arrayBuffer().then((buf) => socket.send(buf));
+      }
+    };
+    recorder.start(250);
+  };
+  socket.onmessage = (event) => {
+    const blob = new Blob([event.data], { type: 'audio/mpeg' });
+    const url = URL.createObjectURL(blob);
+    if (player) {
+      player.pause();
+    }
+    player = new Audio(url);
+    playing = true;
+    player.onended = () => {
+      playing = false;
+      URL.revokeObjectURL(url);
+    };
+    player.play();
+  };
+  socket.onclose = () => {
+    setStatus('Call ended.');
+    startBtn.disabled = false;
+    endBtn.disabled = true;
+  };
 }
 
 function endCall() {
-  if (pc) {
-    pc.close();
-    pc = null;
+  if (recorder && recorder.state !== 'inactive') {
+    recorder.stop();
+  }
+  if (vadTimer) {
+    clearInterval(vadTimer);
+    vadTimer = null;
+  }
+  if (audioCtx) {
+    audioCtx.close();
+    audioCtx = null;
   }
   if (localStream) {
     localStream.getTracks().forEach((track) => track.stop());
     localStream = null;
+  }
+  if (socket) {
+    socket.close();
+    socket = null;
   }
   startBtn.disabled = false;
   endBtn.disabled = true;

@@ -1,4 +1,6 @@
-pipecat-ai[elevenlabs,google,webrtc]
+langchain
+langchain-google-genai
+elevenlabs
 fastapi
 uvicorn[standard]
 python-dotenv
