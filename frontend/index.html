@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Clinic Dashboard - Voice Appointment Assistant</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>City Care Clinic - Dashboard</h1>
+    <span id="lineStatus" class="line-status idle">Line: idle</span>
+  </header>
+
+  <main>
+    <!-- Top left: live call + transcript -->
+    <section class="card">
+      <h2>Live Call</h2>
+      <div id="callerInfo" class="caller-info">No active call</div>
+      <div id="transcript" class="transcript">
+        <p class="empty">The conversation will appear here when a call starts.</p>
+      </div>
+    </section>
+
+    <!-- Top right: doctors -->
+    <section class="card">
+      <h2>Doctors &amp; Available Slots</h2>
+      <div id="doctors"></div>
+    </section>
+
+    <!-- Bottom left: caller's phone (separate person calling) -->
+    <section class="card phone-card">
+      <h2>Caller's Phone (emulator)</h2>
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="screen">
+          <!-- Before the call -->
+          <div id="idleView">
+            <p class="phone-title">Dial the clinic</p>
+            <label for="nameInput">Your name</label>
+            <input id="nameInput" type="text" placeholder="e.g. Shahjan" maxlength="40" />
+            <label for="phoneInput">Your phone number</label>
+            <input id="phoneInput" type="tel" placeholder="98765 43210" maxlength="16" />
+            <p id="phoneError" class="error"></p>
+            <button id="callBtn" class="call-btn">Call</button>
+          </div>
+
+          <!-- During / after the call -->
+          <div id="callView" hidden>
+            <div class="avatar">CC</div>
+            <div class="callee">City Care Clinic</div>
+            <div id="callStatus" class="call-status">Calling...</div>
+            <div id="timer" class="timer">00:00</div>
+            <button id="hangBtn" class="hang-btn">End</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bottom right: appointments -->
+    <section class="card">
+      <h2>Appointments</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Patient</th><th>Phone</th><th>Doctor</th>
+              <th>Date</th><th>Time</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="appointments"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <audio id="remoteAudio" autoplay></audio>
+  <script src="app.js"></script>
+</body>
+</html>

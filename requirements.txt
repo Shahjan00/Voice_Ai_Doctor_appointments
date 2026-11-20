@@ -1,6 +1,7 @@
-langchain
-langchain-google-genai
-elevenlabs
+pipecat-ai[elevenlabs,google,silero,webrtc]==1.16.0
 fastapi
 uvicorn[standard]
+sqlalchemy>=2.0
 python-dotenv
+aiohttp
+pytest
